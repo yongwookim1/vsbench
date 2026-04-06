@@ -4,7 +4,7 @@ using Google Translate via deep-translator (no API key required).
 
 Usage:
     pip install deep-translator
-    python translate_deepl.py \
+    python translate_google.py \
         --data_dir ./Video-SafetyBench \
         --output_dir ./translated
 """
