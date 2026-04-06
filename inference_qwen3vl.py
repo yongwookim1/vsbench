@@ -64,8 +64,8 @@ def run_inference(model, processor, video_path: str, question: str, max_new_toke
         tokenize=True,
         add_generation_prompt=True,
         return_dict=True,
-        return_tensors="pt",
         enable_thinking=False,
+        processor_kwargs={"return_tensors": "pt"},
     ).to(model.device)
 
     with torch.no_grad():
