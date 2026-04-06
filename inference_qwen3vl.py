@@ -33,7 +33,7 @@ def load_model(model_path: str):
     print(f"[INFO] Loading model: {model_path}")
     model = AutoModelForImageTextToText.from_pretrained(
         model_path,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         device_map="auto",
         trust_remote_code=True,
     )
@@ -64,15 +64,17 @@ def run_inference(model, processor, video_path: str, question: str, max_new_toke
         messages,
         tokenize=False,
         add_generation_prompt=True,
-        enable_thinking=False,
     )
-    image_inputs, video_inputs = process_vision_info(messages)
+    image_inputs, video_inputs, video_kwargs = process_vision_info(
+        messages, return_video_kwargs=True
+    )
     inputs = processor(
         text=[text],
         images=image_inputs,
         videos=video_inputs,
         padding=True,
         return_tensors="pt",
+        **video_kwargs,
     ).to(model.device)
 
     with torch.no_grad():
