@@ -4,7 +4,7 @@ using Google Translate via deep-translator (no API key required).
 
 Usage:
     pip install deep-translator
-    python translate.py \
+    python translate_deepl.py \
         --data_dir ./Video-SafetyBench \
         --output_dir ./translated
 """
@@ -17,7 +17,6 @@ from pathlib import Path
 from deep_translator import GoogleTranslator
 from tqdm import tqdm
 
-# Fields to translate (text-only fields in each record)
 TRANSLATE_FIELDS = ["question", "harmful_intention"]
 
 translator = GoogleTranslator(source="en", target="ko")
@@ -35,7 +34,6 @@ def translate_records(
     records: list[dict],
     checkpoint_path: Path,
 ) -> list[dict]:
-    # Load checkpoint if exists
     done: dict[str, dict] = {}
     if checkpoint_path.exists():
         with open(checkpoint_path) as f:
@@ -54,7 +52,6 @@ def translate_records(
 
         results.append(record)
 
-        # Save checkpoint every record
         with open(checkpoint_path, "w", encoding="utf-8") as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
 
