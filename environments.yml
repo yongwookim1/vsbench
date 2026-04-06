@@ -21,5 +21,6 @@ dependencies:
       - accelerate>=0.34.0
       - qwen-vl-utils
       - tqdm
+      - deep-translator
       - sentencepiece
       - protobuf
