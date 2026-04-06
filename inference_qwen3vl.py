@@ -19,6 +19,7 @@ import json
 from pathlib import Path
 
 import torch
+from qwen_vl_utils import process_vision_info
 from tqdm import tqdm
 from transformers import AutoModelForImageTextToText, AutoProcessor
 
@@ -59,13 +60,19 @@ def run_inference(model, processor, video_path: str, question: str, max_new_toke
         },
     ]
 
-    inputs = processor.apply_chat_template(
+    text = processor.apply_chat_template(
         messages,
-        tokenize=True,
+        tokenize=False,
         add_generation_prompt=True,
-        return_dict=True,
         enable_thinking=False,
-        processor_kwargs={"return_tensors": "pt"},
+    )
+    image_inputs, video_inputs = process_vision_info(messages)
+    inputs = processor(
+        text=[text],
+        images=image_inputs,
+        videos=video_inputs,
+        padding=True,
+        return_tensors="pt",
     ).to(model.device)
 
     with torch.no_grad():
