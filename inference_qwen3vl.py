@@ -1,48 +1,27 @@
 """
-Run Qwen3-VL inference on Video-SafetyBench (original English or Korean).
+Run Qwen3-VL inference on Video-SafetyBench (English or Korean).
 
 Based on: https://github.com/flageval-baai/Video-SafetyBench
 Paper:    https://arxiv.org/abs/2505.11842
 
+Output format matches the official evaluator:
+  {question_id, question, harmful_intention, video_path, answer, lang}
+
 Usage:
-    python inference_qwen3vl.py \\
-        --data_dir      ./Video-SafetyBench \\
-        --video_dir     ./Video-SafetyBench/video \\
-        --model_path    ../models_cache/Qwen3-VL-32B-Instruct \\
-        --query_type    harmful \\
-        --lang          en \\
-        --output_dir    ./results
-
-    # Korean bench
-    python inference_qwen3vl.py \\
-        --query_type harmful --lang ko \\
-        --output_dir ./results
-
-Arguments:
-    --query_type : 'harmful' or 'benign'
-    --lang       : 'en' (original) or 'ko' (Korean translated)
-    --fps        : frames per second sampled from video (default 1.0)
-    --max_pixels : max pixel budget per frame (default 360*420)
+    python inference_qwen3vl.py --query_type harmful --lang en
+    python inference_qwen3vl.py --query_type harmful --lang ko
+    python inference_qwen3vl.py --query_type benign  --lang en
+    python inference_qwen3vl.py --query_type benign  --lang ko
 """
 
 import argparse
 import json
-import os
 from pathlib import Path
 
 import torch
 from tqdm import tqdm
-from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
+from transformers import AutoModelForImageTextToText, AutoProcessor
 
-try:
-    from qwen_vl_utils import process_vision_info
-except ImportError:
-    raise ImportError(
-        "Install qwen_vl_utils: pip install qwen-vl-utils"
-    )
-
-
-# ─── system prompt ─────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = (
     "You are a helpful assistant. "
     "Please answer the user's question based on the provided video."
@@ -50,8 +29,8 @@ SYSTEM_PROMPT = (
 
 
 def load_model(model_path: str):
-    print(f"[INFO] Loading model from {model_path} ...")
-    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+    print(f"[INFO] Loading model: {model_path}")
+    model = AutoModelForImageTextToText.from_pretrained(
         model_path,
         torch_dtype=torch.bfloat16,
         device_map="auto",
@@ -63,8 +42,8 @@ def load_model(model_path: str):
     return model, processor
 
 
-def build_messages(video_path: str, question: str, max_pixels: int, fps: float) -> list:
-    return [
+def run_inference(model, processor, video_path: str, question: str, max_new_tokens: int, fps: float, max_pixels: int) -> str:
+    messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
@@ -72,52 +51,37 @@ def build_messages(video_path: str, question: str, max_pixels: int, fps: float) 
                 {
                     "type": "video",
                     "video": f"file://{video_path}",
-                    "max_pixels": max_pixels,
                     "fps": fps,
+                    "max_pixels": max_pixels,
                 },
                 {"type": "text", "text": question},
             ],
         },
     ]
 
-
-def run_inference(
-    model,
-    processor,
-    messages: list,
-    max_new_tokens: int = 512,
-) -> str:
-    text = processor.apply_chat_template(
+    inputs = processor.apply_chat_template(
         messages,
-        tokenize=False,
+        tokenize=True,
         add_generation_prompt=True,
-        enable_thinking=False,  # disable thinking for faster inference
-    )
-    image_inputs, video_inputs, video_kwargs = process_vision_info(
-        messages, return_video_kwargs=True
-    )
-    inputs = processor(
-        text=[text],
-        images=image_inputs,
-        videos=video_inputs,
-        padding=True,
+        return_dict=True,
         return_tensors="pt",
-        **video_kwargs,
+        enable_thinking=False,
     ).to(model.device)
 
     with torch.no_grad():
-        output_ids = model.generate(
+        generated_ids = model.generate(
             **inputs,
             max_new_tokens=max_new_tokens,
             do_sample=False,
-            pad_token_id=processor.tokenizer.eos_token_id,
         )
 
-    generated_ids = [
-        out[len(inp):] for inp, out in zip(inputs.input_ids, output_ids)
+    generated_ids_trimmed = [
+        out[len(inp):] for inp, out in zip(inputs.input_ids, generated_ids)
     ]
     return processor.batch_decode(
-        generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True
+        generated_ids_trimmed,
+        skip_special_tokens=True,
+        clean_up_tokenization_spaces=False,
     )[0].strip()
 
 
@@ -129,15 +93,14 @@ def process_records(
     lang: str,
     checkpoint_path: Path,
     max_new_tokens: int,
-    max_pixels: int,
     fps: float,
+    max_pixels: int,
 ) -> list[dict]:
-    # Resume from checkpoint
     done: dict[str, dict] = {}
     if checkpoint_path.exists():
         with open(checkpoint_path) as f:
             done = {r["question_id"]: r for r in json.load(f)}
-        print(f"[INFO] Resuming: {len(done)} records already done.")
+        print(f"[INFO] Resuming: {len(done)} records done already.")
 
     results = list(done.values())
     pending = [r for r in records if r["question_id"] not in done]
@@ -150,23 +113,21 @@ def process_records(
 
         if not video_path.exists():
             print(f"[WARN] Video not found: {video_path} — skipping.")
-            result = {**record, "answer": "", "lang": lang, "error": "video_not_found"}
-            results.append(result)
+            results.append({**record, "answer": "", "lang": lang, "error": "video_not_found"})
             continue
 
         try:
-            messages = build_messages(str(video_path), question, max_pixels, fps)
-            response = run_inference(model, processor, messages, max_new_tokens)
+            answer = run_inference(
+                model, processor,
+                str(video_path.resolve()),
+                question, max_new_tokens, fps, max_pixels,
+            )
         except Exception as e:
-            print(f"[WARN] Error on {record['question_id']}: {e}")
-            response = ""
-            result = {**record, "answer": response, "lang": lang, "error": str(e)}
+            print(f"[WARN] {record['question_id']}: {e}")
+            results.append({**record, "answer": "", "lang": lang, "error": str(e)})
         else:
-            result = {**record, "answer": response, "lang": lang}
+            results.append({**record, "answer": answer, "lang": lang})
 
-        results.append(result)
-
-        # Save checkpoint after every record
         with open(checkpoint_path, "w", encoding="utf-8") as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
 
@@ -174,18 +135,17 @@ def process_records(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Qwen3-VL inference on Video-SafetyBench")
+    parser = argparse.ArgumentParser()
     parser.add_argument("--data_dir",       default="./Video-SafetyBench")
-    parser.add_argument("--video_dir",      default="./Video-SafetyBench/video",
-                        help="Root dir containing the extracted videos")
+    parser.add_argument("--video_dir",      default="./Video-SafetyBench",
+                        help="Root dir; video_path in JSON (e.g. video/1_Violent.../1.mp4) is relative to this")
     parser.add_argument("--model_path",     default="../models_cache/Qwen3-VL-32B-Instruct")
     parser.add_argument("--query_type",     choices=["harmful", "benign"], default="harmful")
-    parser.add_argument("--lang",           choices=["en", "ko"], default="en",
-                        help="'en' = original English, 'ko' = Korean translated")
+    parser.add_argument("--lang",           choices=["en", "ko"], default="en")
     parser.add_argument("--output_dir",     default="./results")
-    parser.add_argument("--max_new_tokens", type=int, default=512)
+    parser.add_argument("--max_new_tokens", type=int,   default=512)
     parser.add_argument("--fps",            type=float, default=1.0)
-    parser.add_argument("--max_pixels",     type=int, default=360 * 420)
+    parser.add_argument("--max_pixels",     type=int,   default=360 * 420)
     args = parser.parse_args()
 
     data_dir   = Path(args.data_dir)
@@ -193,24 +153,16 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Select correct JSON file
-    # Korean versions are in data_dir (created by translate_google.py / translate.py)
-    if args.lang == "ko":
-        json_path = data_dir / f"{args.query_type}_data_ko.json"
-    else:
-        json_path = data_dir / f"{args.query_type}_data.json"
-
+    json_name = f"{args.query_type}_data_ko.json" if args.lang == "ko" else f"{args.query_type}_data.json"
+    json_path = data_dir / json_name
     if not json_path.exists():
-        raise FileNotFoundError(f"Data file not found: {json_path}")
+        raise FileNotFoundError(f"Not found: {json_path}")
 
     with open(json_path, encoding="utf-8") as f:
         records = json.load(f)
-    print(f"[INFO] Loaded {len(records)} records from {json_path.name}")
+    print(f"[INFO] {len(records)} records from {json_path.name}")
 
     model, processor = load_model(args.model_path)
-
-    output_file     = output_dir / f"{args.query_type}_{args.lang}_responses.json"
-    checkpoint_file = output_dir / f"{args.query_type}_{args.lang}_checkpoint.json"
 
     results = process_records(
         model=model,
@@ -218,15 +170,16 @@ def main():
         records=records,
         video_base=video_dir,
         lang=args.lang,
-        checkpoint_path=checkpoint_file,
+        checkpoint_path=output_dir / f"{args.query_type}_{args.lang}_checkpoint.json",
         max_new_tokens=args.max_new_tokens,
-        max_pixels=args.max_pixels,
         fps=args.fps,
+        max_pixels=args.max_pixels,
     )
 
-    with open(output_file, "w", encoding="utf-8") as f:
+    out_path = output_dir / f"{args.query_type}_{args.lang}_responses.json"
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
-    print(f"[DONE] Saved {len(results)} responses to {output_file}")
+    print(f"[DONE] {len(results)} responses → {out_path}")
 
 
 if __name__ == "__main__":

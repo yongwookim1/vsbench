@@ -8,7 +8,7 @@ set -e
 MODEL_PATH="${MODEL_PATH:-../models_cache/Qwen3-VL-32B-Instruct}"
 JUDGE_MODEL="${JUDGE_MODEL:-../models_cache/Qwen2.5-72B-Instruct}"
 DATA_DIR="${DATA_DIR:-./Video-SafetyBench}"
-VIDEO_DIR="${VIDEO_DIR:-./Video-SafetyBench/video}"
+VIDEO_DIR="${VIDEO_DIR:-./Video-SafetyBench}"
 RESULTS_DIR="${RESULTS_DIR:-./results}"
 
 echo "=============================="
@@ -20,7 +20,8 @@ echo " Results: $RESULTS_DIR"
 echo "=============================="
 
 # Step 1: Extract videos if not yet done
-if [ ! -d "$VIDEO_DIR" ]; then
+# video.tar.gz extracts to video/ inside DATA_DIR, so full path = DATA_DIR/video/
+if [ ! -d "$DATA_DIR/video" ]; then
     echo "[1/5] Extracting videos..."
     tar -xzf "$DATA_DIR/video.tar.gz" -C "$DATA_DIR"
 else
