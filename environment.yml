@@ -1,0 +1,25 @@
+name: vsbench
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.11
+  - pip
+  - git
+  - git-lfs
+
+  # PyTorch with CUDA 12.1
+  - pytorch>=2.3.0
+  - torchvision
+  - pytorch-cuda=12.1
+
+  - pip:
+      - transformers>=4.51.0
+      - accelerate>=0.34.0
+      - qwen-vl-utils
+      - tqdm
+      - sentencepiece
+      - protobuf
