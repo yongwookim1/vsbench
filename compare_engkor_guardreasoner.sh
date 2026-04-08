@@ -28,6 +28,7 @@ fi
 # Step 2: Launch 4 parallel inference processes, one per GPU
 mkdir -p "$RESULTS_DIR"
 echo "[2/3] Running GuardReasoner-VL inference (4 GPUs in parallel)..."
+PIDS=()
 for GPU_ID in 0 1 2 3; do
     CUDA_VISIBLE_DEVICES=$GPU_ID python inference_guardreasoner.py \
         --model_path "$MODEL_PATH" \
@@ -37,9 +38,17 @@ for GPU_ID in 0 1 2 3; do
         --gpu_id     $GPU_ID \
         --num_gpus   $NUM_GPUS \
         &
+    PIDS+=($!)
 done
 
-wait
+FAILED=0
+for i in "${!PIDS[@]}"; do
+    if ! wait "${PIDS[$i]}"; then
+        echo "[ERROR] GPU $i process failed (PID ${PIDS[$i]})"
+        FAILED=1
+    fi
+done
+[ "$FAILED" -eq 1 ] && echo "[ERROR] One or more GPU processes failed. Check output above." && exit 1
 echo "[2/3] All GPUs finished."
 
 # Step 3: Merge shards and evaluate
