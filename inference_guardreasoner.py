@@ -1,18 +1,23 @@
 """
 Run GuardReasoner-VL inference on Video-SafetyBench (English and Korean).
 
-Loads the model once and runs all 4 combinations (harmful/benign × en/ko)
-in a single pass, consistent with the original GuardReasoner-VL generate.py.
+Supports data-parallel inference across multiple GPUs via --gpu_id / --num_gpus.
+Each process handles its own data shard on a single GPU (set via CUDA_VISIBLE_DEVICES).
 
-Output: one JSONL file per split/lang in --output_dir:
-    harmful_en_guardreasoner.jsonl
-    harmful_ko_guardreasoner.jsonl
-    benign_en_guardreasoner.jsonl
-    benign_ko_guardreasoner.jsonl
+Output: shard JSONL files per split/lang in --output_dir:
+    harmful_en_guardreasoner_gpu{gpu_id}.jsonl
+    ...
 
-Usage:
+Run all GPUs in parallel from the shell script, then merge with evaluate_guardreasoner.py.
+
+Usage (single GPU):
     python inference_guardreasoner.py
-    python inference_guardreasoner.py --model_path yueliu1999/GuardReasoner-VL-7B
+
+Usage (4 GPUs, launched by shell script):
+    CUDA_VISIBLE_DEVICES=0 python inference_guardreasoner.py --gpu_id 0 --num_gpus 4
+    CUDA_VISIBLE_DEVICES=1 python inference_guardreasoner.py --gpu_id 1 --num_gpus 4
+    CUDA_VISIBLE_DEVICES=2 python inference_guardreasoner.py --gpu_id 2 --num_gpus 4
+    CUDA_VISIBLE_DEVICES=3 python inference_guardreasoner.py --gpu_id 3 --num_gpus 4
 """
 
 import argparse
@@ -104,6 +109,8 @@ def main():
     parser.add_argument("--max_pixels",  type=int,   default=360 * 420)
     parser.add_argument("--max_tokens",  type=int,   default=4096)
     parser.add_argument("--gpu_util",    type=float, default=0.70)
+    parser.add_argument("--gpu_id",      type=int,   default=0)
+    parser.add_argument("--num_gpus",    type=int,   default=1)
     args = parser.parse_args()
 
     data_dir  = Path(args.data_dir)
@@ -111,7 +118,7 @@ def main():
     out_dir   = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[INFO] Loading model: {args.model_path}")
+    print(f"[INFO] GPU {args.gpu_id}/{args.num_gpus} — Loading model: {args.model_path}")
     vllm_model = LLM(
         model=args.model_path,
         gpu_memory_utilization=args.gpu_util,
@@ -122,7 +129,7 @@ def main():
     )
     sampling_params = SamplingParams(temperature=0., top_p=1.0, max_tokens=args.max_tokens)
     processor = AutoProcessor.from_pretrained(args.model_path)
-    print("[INFO] Model loaded.")
+    print(f"[INFO] GPU {args.gpu_id} — Model loaded.")
 
     for split in ["harmful", "benign"]:
         for lang in ["en", "ko"]:
@@ -133,16 +140,18 @@ def main():
                 continue
 
             with open(json_path, encoding="utf-8") as f:
-                data = json.load(f)
-            print(f"[INFO] {split}/{lang}: {len(data)} records from {json_path.name}")
+                full_data = json.load(f)
 
-            results = run_split(vllm_model, sampling_params, processor, data, video_dir, lang, args.fps, args.max_pixels)
+            shard = full_data[args.gpu_id::args.num_gpus]
+            print(f"[INFO] GPU {args.gpu_id} — {split}/{lang}: {len(shard)}/{len(full_data)} records")
 
-            out_path = out_dir / f"{split}_{lang}_guardreasoner.jsonl"
+            results = run_split(vllm_model, sampling_params, processor, shard, video_dir, lang, args.fps, args.max_pixels)
+
+            out_path = out_dir / f"{split}_{lang}_guardreasoner_gpu{args.gpu_id}.jsonl"
             with open(out_path, "w", encoding="utf-8") as f:
                 for item in results:
                     f.write(json.dumps(item, ensure_ascii=False) + "\n")
-            print(f"[DONE] {len(results)} records → {out_path}")
+            print(f"[DONE] GPU {args.gpu_id} — {len(results)} records → {out_path}")
 
 
 if __name__ == "__main__":

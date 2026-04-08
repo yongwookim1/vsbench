@@ -9,10 +9,12 @@ MODEL_PATH="${MODEL_PATH:-yueliu1999/GuardReasoner-VL-7B}"
 DATA_DIR="${DATA_DIR:-./Video-SafetyBench}"
 VIDEO_DIR="${VIDEO_DIR:-./Video-SafetyBench}"
 RESULTS_DIR="${RESULTS_DIR:-./results}"
+NUM_GPUS=4
 
 echo "=============================="
 echo " Video-SafetyBench EN vs KO"
-echo " Model: $MODEL_PATH"
+echo " Model   : $MODEL_PATH"
+echo " Num GPUs: $NUM_GPUS"
 echo "=============================="
 
 # Step 1: Extract videos if not yet done
@@ -23,17 +25,28 @@ else
     echo "[1/3] Videos already extracted, skipping."
 fi
 
-# Step 2: Inference — all splits and languages in one pass
-echo "[2/3] Running GuardReasoner-VL inference..."
-python inference_guardreasoner.py \
-    --model_path "$MODEL_PATH" \
-    --data_dir   "$DATA_DIR" \
-    --video_dir  "$VIDEO_DIR" \
-    --output_dir "$RESULTS_DIR"
+# Step 2: Launch 4 parallel inference processes, one per GPU
+mkdir -p "$RESULTS_DIR"
+echo "[2/3] Running GuardReasoner-VL inference (4 GPUs in parallel)..."
+for GPU_ID in 0 1 2 3; do
+    CUDA_VISIBLE_DEVICES=$GPU_ID python inference_guardreasoner.py \
+        --model_path "$MODEL_PATH" \
+        --data_dir   "$DATA_DIR" \
+        --video_dir  "$VIDEO_DIR" \
+        --output_dir "$RESULTS_DIR" \
+        --gpu_id     $GPU_ID \
+        --num_gpus   $NUM_GPUS \
+        > "$RESULTS_DIR/gpu${GPU_ID}.log" 2>&1 &
+done
 
-# Step 3: Evaluate
+wait
+echo "[2/3] All GPUs finished."
+
+# Step 3: Merge shards and evaluate
 echo "[3/3] Computing F1 scores..."
-python evaluate_guardreasoner.py --results_dir "$RESULTS_DIR"
+python evaluate_guardreasoner.py \
+    --results_dir "$RESULTS_DIR" \
+    --num_gpus    $NUM_GPUS
 
 echo ""
 echo "[DONE] All results saved to $RESULTS_DIR"
