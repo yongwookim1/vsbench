@@ -23,6 +23,7 @@ Usage (4 GPUs, launched by shell script):
 import argparse
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from tqdm import tqdm
@@ -38,53 +39,45 @@ INSTRUCTION = "You are a classifier for analyzing interactions between humans an
 def run_split(vllm_model, sampling_params, processor, data, video_dir, lang, fps, max_pixels, gpu_id=0, split=""):
     question_key = "question_ko" if lang == "ko" else "question"
 
-    input_list = []
-    save_dict_list = []
-
-    for record in tqdm(data, desc=f"[GPU {gpu_id}][{split}/{lang}] building inputs", dynamic_ncols=True):
+    def build_one(record):
         question = record.get(question_key) or record.get("question", "")
         video_abs = str((video_dir / record["video_path"]).resolve())
         input_text = f"Human user:\n{question}\n\nAI assistant:\nNone\n\n"
-
         messages = [
-            {
-                "role": "system",
-                "content": INSTRUCTION,
-            },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "video",
-                        "video": f"file://{video_abs}",
-                        "fps": fps,
-                        "max_pixels": max_pixels,
-                    },
-                    {"type": "text", "text": input_text},
-                ],
-            },
+            {"role": "system", "content": INSTRUCTION},
+            {"role": "user", "content": [
+                {"type": "video", "video": f"file://{video_abs}", "fps": fps, "max_pixels": max_pixels},
+                {"type": "text", "text": input_text},
+            ]},
         ]
-
         image_inputs, video_inputs, video_kwargs = process_vision_info(messages, return_video_kwargs=True)
-
         mm_data = {}
         if image_inputs is not None:
             mm_data["image"] = image_inputs
         if video_inputs is not None:
             mm_data["video"] = video_inputs
-
         prompt = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         llm_inputs = {"prompt": prompt, "multi_modal_data": mm_data}
         if video_kwargs:
             llm_inputs["mm_processor_kwargs"] = video_kwargs
-
-        input_list.append(llm_inputs)
-        save_dict_list.append({
+        save_dict = {
             "question_id": record["question_id"],
             "text_input":  input_text,
             "video_path":  video_abs,
             "label":       "harmful",
-        })
+        }
+        return llm_inputs, save_dict
+
+    results_unordered = {}
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(build_one, record): i for i, record in enumerate(data)}
+        for future in tqdm(as_completed(futures), total=len(data),
+                           desc=f"[GPU {gpu_id}][{split}/{lang}] building inputs", dynamic_ncols=True):
+            idx = futures[future]
+            results_unordered[idx] = future.result()
+
+    input_list    = [results_unordered[i][0] for i in range(len(data))]
+    save_dict_list = [results_unordered[i][1] for i in range(len(data))]
 
     print(f"[GPU {gpu_id}][{split}/{lang}] Generating {len(input_list)} samples...", flush=True)
     outputs = vllm_model.generate(input_list, sampling_params=sampling_params)
@@ -111,7 +104,7 @@ def main():
     parser.add_argument("--fps",         type=float, default=1.0)
     parser.add_argument("--max_pixels",  type=int,   default=360 * 420)
     parser.add_argument("--max_tokens",  type=int,   default=4096)
-    parser.add_argument("--gpu_util",    type=float, default=0.70)
+    parser.add_argument("--gpu_util",    type=float, default=0.85)
     parser.add_argument("--gpu_id",      type=int,   default=0)
     parser.add_argument("--num_gpus",    type=int,   default=1)
     args = parser.parse_args()
@@ -127,7 +120,7 @@ def main():
         gpu_memory_utilization=args.gpu_util,
         max_num_seqs=256,
         limit_mm_per_prompt={"image": 10, "video": 10},
-        enforce_eager=True,
+        enforce_eager=False,
         max_model_len=32768,
     )
     sampling_params = SamplingParams(temperature=0., top_p=1.0, max_tokens=args.max_tokens)
