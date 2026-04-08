@@ -5,7 +5,7 @@
 
 set -e
 
-MODEL_PATH="${MODEL_PATH:-yueliu1999/GuardReasoner-VL-7B}"
+MODEL_PATH="${MODEL_PATH:-/home/work/MLLM_Safety/guardrail/models/GuardReasoner-VL-3B}"
 DATA_DIR="${DATA_DIR:-./Video-SafetyBench}"
 VIDEO_DIR="${VIDEO_DIR:-./Video-SafetyBench}"
 RESULTS_DIR="${RESULTS_DIR:-./results}"
@@ -36,7 +36,7 @@ for GPU_ID in 0 1 2 3; do
         --output_dir "$RESULTS_DIR" \
         --gpu_id     $GPU_ID \
         --num_gpus   $NUM_GPUS \
-        > "$RESULTS_DIR/gpu${GPU_ID}.log" 2>&1 &
+        &
 done
 
 wait

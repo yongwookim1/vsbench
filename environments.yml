@@ -20,6 +20,8 @@ dependencies:
       - transformers>=4.57.0
       - accelerate>=0.34.0
       - qwen-vl-utils
+      - vllm
+      - scikit-learn
       - tqdm
       - deep-translator
       - sentencepiece
