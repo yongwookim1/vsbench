@@ -66,6 +66,8 @@ def main():
                         f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
                 scores.append(cal_f1(records))
+                for gpu_id in range(args.num_gpus):
+                    (results_dir / f"{split}_{lang}_guardreasoner_gpu{gpu_id}.jsonl").unlink(missing_ok=True)
             except FileNotFoundError as e:
                 print(f"[WARN] {e}")
                 scores.append(None)
