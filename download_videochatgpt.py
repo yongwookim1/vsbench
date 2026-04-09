@@ -125,13 +125,10 @@ def download_via_gitlfs(output_dir: Path):
             print(f"[SKIP] {out_path} already exists.")
             continue
 
-        # HF parquet layout: data/<config>/test-*.parquet
-        parquet_files = list((clone_dir / "data" / config_name).glob("test-*.parquet"))
+        # Layout: _clone/<ConfigName>/*.parquet
+        parquet_files = list((clone_dir / config_name).glob("*.parquet"))
         if not parquet_files:
-            # fallback: flat layout
-            parquet_files = list(clone_dir.glob(f"**/{config_name}*.parquet"))
-        if not parquet_files:
-            print(f"[WARN] No parquet found for {config_name}, skipping.")
+            print(f"[WARN] No parquet found for {config_name} in {clone_dir / config_name}")
             continue
 
         print(f"[INFO] Converting {config_name} ({len(parquet_files)} parquet file(s))...")
@@ -139,13 +136,24 @@ def download_via_gitlfs(output_dir: Path):
         for pf in sorted(parquet_files):
             records.extend(convert_parquet(pf, split_name, question_field))
 
-        # Re-index question_ids to be globally unique
         for i, r in enumerate(records):
             r["question_id"] = f"vcgpt_{split_name}_{i:05d}"
 
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(records, f, ensure_ascii=False, indent=2)
         print(f"[DONE] {len(records)} records → {out_path}")
+
+    # Extract videos.zip if present and videos/ not yet extracted
+    videos_zip = clone_dir / "videos.zip"
+    videos_dir = output_dir / "videos"
+    if videos_zip.exists() and not videos_dir.is_dir():
+        print(f"[INFO] Extracting {videos_zip} → {videos_dir} ...")
+        import zipfile
+        with zipfile.ZipFile(videos_zip) as zf:
+            zf.extractall(output_dir)
+        print(f"[DONE] Videos extracted to {videos_dir}")
+    elif videos_dir.is_dir():
+        print(f"[SKIP] Videos already extracted at {videos_dir}")
 
 
 # ── Video download (yt-dlp) ───────────────────────────────────────────────────
