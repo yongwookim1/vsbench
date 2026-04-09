@@ -1,58 +1,85 @@
 #!/bin/bash
-# Download BAAI/Video-SafetyBench dataset using git lfs
-# Requires: git, git-lfs, and HF_TOKEN env var set (gated dataset)
+# Unified dataset download script.
 #
 # Usage:
-#   export HF_TOKEN=hf_xxxxxxxxxxxx
-#   bash download.sh
+#   bash download.sh --dataset video_safetybench [--data_dir ./data/video_safetybench] [--download_videos]
+#   bash download.sh --dataset videochatgpt      [--data_dir ./data/videochatgpt]       [--download_videos]
 #
-# To also download videos (13.2 GB), set: DOWNLOAD_VIDEOS=1
-#   DOWNLOAD_VIDEOS=1 bash download.sh
+# For video_safetybench, HF_TOKEN must be set (gated dataset):
+#   export HF_TOKEN=hf_xxxxxxxxxxxx
 
 set -e
 
-DATASET_URL="https://huggingface.co/datasets/BAAI/Video-SafetyBench"
-DEST_DIR="./Video-SafetyBench"
-DOWNLOAD_VIDEOS="${DOWNLOAD_VIDEOS:-0}"
+DATASET=""
+DATA_DIR=""
+DOWNLOAD_VIDEOS=0
 
-# Check dependencies
-if ! command -v git &>/dev/null; then
-    echo "[ERROR] git is not installed."
+usage() {
+    echo "Usage: $0 --dataset <name> [--data_dir <path>] [--download_videos]"
+    echo "  Datasets: video_safetybench, videochatgpt"
     exit 1
-fi
+}
 
-if ! command -v git-lfs &>/dev/null; then
-    echo "[ERROR] git-lfs is not installed. Install it with:"
-    echo "  sudo apt install git-lfs   # Ubuntu/Debian"
-    echo "  brew install git-lfs       # macOS"
-    exit 1
-fi
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --dataset)        DATASET="$2";        shift 2 ;;
+        --data_dir)       DATA_DIR="$2";       shift 2 ;;
+        --download_videos) DOWNLOAD_VIDEOS=1;  shift ;;
+        *) echo "[ERROR] Unknown option: $1"; usage ;;
+    esac
+done
 
-if [ -z "$HF_TOKEN" ]; then
-    echo "[ERROR] HF_TOKEN is not set. Export your HuggingFace token:"
-    echo "  export HF_TOKEN=hf_xxxxxxxxxxxx"
-    exit 1
-fi
+[[ -z "$DATASET" ]] && echo "[ERROR] --dataset is required." && usage
 
-# Initialize git lfs
-git lfs install
+# ── video_safetybench ─────────────────────────────────────────────────────────
+if [[ "$DATASET" == "video_safetybench" ]]; then
+    DATA_DIR="${DATA_DIR:-./data/video_safetybench}"
 
-# Embed token into clone URL
-AUTH_URL="https://user:${HF_TOKEN}@huggingface.co/datasets/BAAI/Video-SafetyBench"
+    if [ -z "$HF_TOKEN" ]; then
+        echo "[ERROR] HF_TOKEN is not set."
+        echo "  export HF_TOKEN=hf_xxxxxxxxxxxx"
+        exit 1
+    fi
 
-if [ "$DOWNLOAD_VIDEOS" = "1" ]; then
-    echo "[INFO] Cloning with videos (13.2 GB)..."
-    git clone "$AUTH_URL" "$DEST_DIR"
+    for cmd in git git-lfs; do
+        if ! command -v $cmd &>/dev/null; then
+            echo "[ERROR] $cmd is not installed."
+            exit 1
+        fi
+    done
+
+    git lfs install
+
+    AUTH_URL="https://user:${HF_TOKEN}@huggingface.co/datasets/BAAI/Video-SafetyBench"
+
+    if [ "$DOWNLOAD_VIDEOS" = "1" ]; then
+        echo "[INFO] Cloning with videos (~13 GB)..."
+        git clone "$AUTH_URL" "$DATA_DIR"
+    else
+        echo "[INFO] Cloning JSON metadata only..."
+        GIT_LFS_SKIP_SMUDGE=1 git clone "$AUTH_URL" "$DATA_DIR"
+        cd "$DATA_DIR"
+        git lfs pull --include="benign_data.json,harmful_data.json"
+        cd -
+    fi
+
+    echo "[DONE] Video-SafetyBench → $DATA_DIR"
+
+# ── videochatgpt ──────────────────────────────────────────────────────────────
+elif [[ "$DATASET" == "videochatgpt" ]]; then
+    DATA_DIR="${DATA_DIR:-./data/videochatgpt}"
+
+    VIDEOS_FLAG=""
+    [ "$DOWNLOAD_VIDEOS" = "1" ] && VIDEOS_FLAG="--download_videos"
+
+    python download_videochatgpt.py \
+        --output_dir "$DATA_DIR" \
+        $VIDEOS_FLAG
+
+    echo "[DONE] VideoChatGPT → $DATA_DIR"
+
 else
-    echo "[INFO] Cloning JSON files only (skipping video.tar.gz)..."
-    # Skip LFS blobs during clone, then selectively pull only JSON files
-    GIT_LFS_SKIP_SMUDGE=1 git clone "$AUTH_URL" "$DEST_DIR"
-    cd "$DEST_DIR"
-    # Pull only the JSON metadata files (not the 13.2 GB video archive)
-    git lfs pull --include="benign_data.json,harmful_data.json"
-    cd ..
+    echo "[ERROR] Unknown dataset: $DATASET"
+    echo "  Available: video_safetybench, videochatgpt"
+    exit 1
 fi
-
-echo "[DONE] Dataset downloaded to: $DEST_DIR"
-echo "  benign_data.json  : $(wc -l < $DEST_DIR/benign_data.json) lines"
-echo "  harmful_data.json : $(wc -l < $DEST_DIR/harmful_data.json) lines"

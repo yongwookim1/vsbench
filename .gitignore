@@ -1,7 +1,6 @@
-# Custom
-/translated
-/Video-SafetyBench
-/results
+# Custom — data and outputs
+/data/
+/results/
 
 # Created by https://www.toptal.com/developers/gitignore/api/python
 # Edit at https://www.toptal.com/developers/gitignore?templates=python

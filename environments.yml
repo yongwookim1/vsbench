@@ -26,3 +26,5 @@ dependencies:
       - deep-translator
       - sentencepiece
       - protobuf
+      - datasets          # for downloading VideoChatGPT parquet files
+      - yt-dlp            # for downloading VideoChatGPT videos from YouTube
