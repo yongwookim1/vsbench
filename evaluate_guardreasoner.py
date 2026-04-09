@@ -53,6 +53,7 @@ def main():
     print(f"{'':10} {'harmful':>12} {'benign':>12}")
     print("-" * 36)
 
+    summary = {}
     for lang in langs:
         scores = []
         for split in splits:
@@ -69,9 +70,15 @@ def main():
                 print(f"[WARN] {e}")
                 scores.append(None)
 
+        summary[lang] = dict(zip(splits, scores))
         print(f"{lang.upper():10}" + "".join(fmt(s) for s in scores))
 
     print("=" * 60)
+
+    summary_path = results_dir / "summary.json"
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2, ensure_ascii=False)
+    print(f"[INFO] Summary saved to {summary_path}")
 
 
 if __name__ == "__main__":
