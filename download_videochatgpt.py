@@ -1,17 +1,24 @@
 """
 Download lmms-lab/VideoChatGPT and convert to standard JSON format.
 
+Two download methods for metadata:
+  --method datasets  (default) — uses HuggingFace `datasets` library
+  --method git-lfs             — clones the HF repo with git-lfs, then converts parquet
+
 Steps:
-  1. Pull parquet files from HuggingFace via the `datasets` library.
+  1. Download parquet files from HuggingFace.
   2. Normalise into {split}_data.json with fields:
        question_id, video_name, question, answer  (+ question_2 for consistency)
   3. Optionally download MP4s from YouTube via yt-dlp (strips "v_" prefix → YT ID).
 
 Usage:
-    # Metadata only (no videos)
+    # datasets library (default)
     python download_videochatgpt.py --output_dir ./data/videochatgpt
 
-    # With videos (~may take a long time)
+    # git-lfs clone
+    python download_videochatgpt.py --output_dir ./data/videochatgpt --method git-lfs
+
+    # With videos
     python download_videochatgpt.py --output_dir ./data/videochatgpt --download_videos
 """
 
@@ -22,6 +29,8 @@ import sys
 from pathlib import Path
 
 
+HF_REPO = "https://huggingface.co/datasets/lmms-lab/VideoChatGPT"
+
 CONFIGS = {
     "generic":     ("Generic",     "question"),
     "temporal":    ("Temporal",    "question"),
@@ -29,7 +38,33 @@ CONFIGS = {
 }
 
 
-def download_metadata(output_dir: Path):
+# ── Parquet → JSON conversion (shared by both methods) ───────────────────────
+
+def convert_parquet(parquet_path: Path, split_name: str, question_field: str) -> list[dict]:
+    try:
+        import pandas as pd
+    except ImportError:
+        print("[ERROR] `pandas` not installed. Run: pip install pandas pyarrow")
+        sys.exit(1)
+
+    df = pd.read_parquet(parquet_path)
+    records = []
+    for i, row in df.iterrows():
+        record = {
+            "question_id": f"vcgpt_{split_name}_{i:05d}",
+            "video_name":  row["video_name"],
+            "question":    row[question_field],
+            "answer":      row["answer"],
+        }
+        if "question_2" in df.columns:
+            record["question_2"] = row["question_2"]
+        records.append(record)
+    return records
+
+
+# ── Method 1: HuggingFace datasets library ────────────────────────────────────
+
+def download_via_datasets(output_dir: Path):
     try:
         from datasets import load_dataset
     except ImportError:
@@ -55,7 +90,6 @@ def download_metadata(output_dir: Path):
                 "question":    row[question_field],
                 "answer":      row["answer"],
             }
-            # Keep question_2 for the consistency subset (useful for future eval)
             if "question_2" in row:
                 record["question_2"] = row["question_2"]
             records.append(record)
@@ -65,11 +99,61 @@ def download_metadata(output_dir: Path):
         print(f"[DONE] {len(records)} records → {out_path}")
 
 
+# ── Method 2: git-lfs clone ───────────────────────────────────────────────────
+
+def download_via_gitlfs(output_dir: Path):
+    for cmd in ["git", "git-lfs"]:
+        if subprocess.run(["which", cmd], capture_output=True).returncode != 0:
+            print(f"[ERROR] `{cmd}` is not installed.")
+            sys.exit(1)
+
+    clone_dir = output_dir / "_clone"
+
+    if not clone_dir.exists():
+        print(f"[INFO] Cloning {HF_REPO} with git-lfs...")
+        subprocess.run(["git", "lfs", "install"], check=True)
+        subprocess.run(["git", "clone", HF_REPO, str(clone_dir)], check=True)
+    else:
+        print(f"[SKIP] Clone already exists at {clone_dir}")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Convert each subset's parquet to JSON
+    for split_name, (config_name, question_field) in CONFIGS.items():
+        out_path = output_dir / f"{split_name}_data.json"
+        if out_path.exists():
+            print(f"[SKIP] {out_path} already exists.")
+            continue
+
+        # HF parquet layout: data/<config>/test-*.parquet
+        parquet_files = list((clone_dir / "data" / config_name).glob("test-*.parquet"))
+        if not parquet_files:
+            # fallback: flat layout
+            parquet_files = list(clone_dir.glob(f"**/{config_name}*.parquet"))
+        if not parquet_files:
+            print(f"[WARN] No parquet found for {config_name}, skipping.")
+            continue
+
+        print(f"[INFO] Converting {config_name} ({len(parquet_files)} parquet file(s))...")
+        records = []
+        for pf in sorted(parquet_files):
+            records.extend(convert_parquet(pf, split_name, question_field))
+
+        # Re-index question_ids to be globally unique
+        for i, r in enumerate(records):
+            r["question_id"] = f"vcgpt_{split_name}_{i:05d}"
+
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(records, f, ensure_ascii=False, indent=2)
+        print(f"[DONE] {len(records)} records → {out_path}")
+
+
+# ── Video download (yt-dlp) ───────────────────────────────────────────────────
+
 def download_videos(output_dir: Path):
     videos_dir = output_dir / "videos"
     videos_dir.mkdir(exist_ok=True)
 
-    # Collect unique video names across all splits
     video_names: set[str] = set()
     for json_file in output_dir.glob("*_data.json"):
         with open(json_file, encoding="utf-8") as f:
@@ -111,15 +195,23 @@ def download_videos(output_dir: Path):
         print(f"[INFO] Failed list → {fail_log}")
 
 
+# ── Entry point ───────────────────────────────────────────────────────────────
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output_dir",      default="./data/videochatgpt")
+    parser.add_argument("--method",          default="datasets", choices=["datasets", "git-lfs"],
+                        help="Download method: datasets (default) | git-lfs")
     parser.add_argument("--download_videos", action="store_true",
                         help="Also download MP4s from YouTube via yt-dlp")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
-    download_metadata(output_dir)
+
+    if args.method == "git-lfs":
+        download_via_gitlfs(output_dir)
+    else:
+        download_via_datasets(output_dir)
 
     if args.download_videos:
         download_videos(output_dir)

@@ -13,9 +13,10 @@ set -e
 DATASET=""
 DATA_DIR=""
 DOWNLOAD_VIDEOS=0
+METHOD="datasets"   # for videochatgpt: datasets | git-lfs
 
 usage() {
-    echo "Usage: $0 --dataset <name> [--data_dir <path>] [--download_videos]"
+    echo "Usage: $0 --dataset <name> [--data_dir <path>] [--download_videos] [--method datasets|git-lfs]"
     echo "  Datasets: video_safetybench, videochatgpt"
     exit 1
 }
@@ -25,6 +26,7 @@ while [[ $# -gt 0 ]]; do
         --dataset)        DATASET="$2";        shift 2 ;;
         --data_dir)       DATA_DIR="$2";       shift 2 ;;
         --download_videos) DOWNLOAD_VIDEOS=1;  shift ;;
+        --method)         METHOD="$2";         shift 2 ;;
         *) echo "[ERROR] Unknown option: $1"; usage ;;
     esac
 done
@@ -74,6 +76,7 @@ elif [[ "$DATASET" == "videochatgpt" ]]; then
 
     python download_videochatgpt.py \
         --output_dir "$DATA_DIR" \
+        --method     "$METHOD" \
         $VIDEOS_FLAG
 
     echo "[DONE] VideoChatGPT → $DATA_DIR"
