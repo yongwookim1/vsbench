@@ -29,6 +29,7 @@ DATA_DIR=""           # default derived from DATASET below
 RESULTS_DIR=""        # default derived from DATASET below
 NUM_GPUS=4
 DOWNLOAD_VIDEOS=0
+DOWNLOAD_METHOD="datasets"
 TRANSLATE_BACKEND="google"
 FORCE_DOWNLOAD=0
 FORCE_TRANSLATE=0
@@ -50,6 +51,7 @@ Paths:
 Options:
   --num_gpus <n>            Number of GPUs for inference (default: 4)
   --download_videos         Also download videos during the download step
+  --method datasets|git-lfs Download method for videochatgpt (default: datasets)
   --translate_backend       google | qwen (default: google)
   --qwen_model_path <path>  Qwen model for translation (only with --translate_backend qwen)
 
@@ -72,8 +74,9 @@ while [[ $# -gt 0 ]]; do
         --data_dir)          DATA_DIR="$2";          shift 2 ;;
         --results_dir)       RESULTS_DIR="$2";       shift 2 ;;
         --num_gpus)          NUM_GPUS="$2";          shift 2 ;;
-        --download_videos)   DOWNLOAD_VIDEOS=1;      shift ;;
-        --translate_backend) TRANSLATE_BACKEND="$2"; shift 2 ;;
+        --download_videos)   DOWNLOAD_VIDEOS=1;             shift ;;
+        --method)            DOWNLOAD_METHOD="$2";          shift 2 ;;
+        --translate_backend) TRANSLATE_BACKEND="$2";        shift 2 ;;
         --qwen_model_path)   QWEN_MODEL_PATH="$2";  shift 2 ;;
         --force-download)    FORCE_DOWNLOAD=1;       shift ;;
         --force-translate)   FORCE_TRANSLATE=1;      shift ;;
@@ -140,7 +143,7 @@ if [[ "$DOWNLOADED" == "1" && "$FORCE_DOWNLOAD" == "0" ]]; then
 else
     VIDEOS_FLAG=""
     [ "$DOWNLOAD_VIDEOS" = "1" ] && VIDEOS_FLAG="--download_videos"
-    bash download.sh --dataset "$DATASET" --data_dir "$DATA_DIR" $VIDEOS_FLAG
+    bash download.sh --dataset "$DATASET" --data_dir "$DATA_DIR" --method "$DOWNLOAD_METHOD" $VIDEOS_FLAG
 fi
 
 # ── Video extraction (video_safetybench only) ─────────────────────────────────
