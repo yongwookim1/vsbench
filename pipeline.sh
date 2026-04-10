@@ -199,10 +199,9 @@ else
             --output_dir "$RESULTS_DIR" \
             --gpu_id     $GPU_ID \
             --num_gpus   $NUM_GPUS \
-            > "$RESULTS_DIR/gpu${GPU_ID}.log" 2>&1 \
             &
         PIDS+=($!)
-        echo "  GPU $GPU_ID — PID ${PIDS[-1]} (log: $RESULTS_DIR/gpu${GPU_ID}.log)"
+        echo "  GPU $GPU_ID — PID ${PIDS[-1]}"
     done
 
     FAILED=0
