@@ -47,6 +47,9 @@ def run_split(vllm_model, sampling_params, processor, data, fps, max_pixels, gpu
 
     def build_one(record):
         video_abs = record["video_path"]
+        if not Path(video_abs).exists():
+            print(f"[WARN] Video not found, skipping: {video_abs}", flush=True)
+            return None
         input_text = f"Human user:\n{record['question']}\n\nAI assistant:\nNone\n\n"
         messages = [
             {"role": "system", "content": INSTRUCTION},
@@ -81,8 +84,9 @@ def run_split(vllm_model, sampling_params, processor, data, fps, max_pixels, gpu
             idx = futures[future]
             results_unordered[idx] = future.result()
 
-    input_list     = [results_unordered[i][0] for i in range(len(data))]
-    save_dict_list = [results_unordered[i][1] for i in range(len(data))]
+    paired = [results_unordered[i] for i in range(len(data)) if results_unordered[i] is not None]
+    input_list     = [p[0] for p in paired]
+    save_dict_list = [p[1] for p in paired]
 
     print(f"[GPU {gpu_id}][{split}/{lang}] Generating {len(input_list)} samples...", flush=True)
     outputs = vllm_model.generate(input_list, sampling_params=sampling_params)

@@ -28,3 +28,6 @@ dependencies:
       - protobuf
       - datasets          # for downloading VideoChatGPT parquet files
       - yt-dlp            # for downloading VideoChatGPT videos from YouTube
+      - decord            # reliable video reader (avoids torchvision video_fps bug)
+      - pandas            # for parquet conversion in download_videochatgpt.py
+      - pyarrow           # required by pandas for parquet support

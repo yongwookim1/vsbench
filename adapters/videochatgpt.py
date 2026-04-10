@@ -38,8 +38,15 @@ class VideoChatGPTAdapter(DatasetAdapter):
     def is_translated(self, data_dir: Path) -> bool:
         return all((data_dir / f"{s}_data_ko.json").exists() for s in self.splits)
 
+    def _videos_dir(self, data_dir: Path) -> Path:
+        for candidate in ("Test_Videos", "videos"):
+            d = data_dir / candidate
+            if d.is_dir():
+                return d
+        return data_dir / "videos"
+
     def is_videos_ready(self, data_dir: Path) -> bool:
-        videos_dir = data_dir / "videos"
+        videos_dir = self._videos_dir(data_dir)
         return videos_dir.is_dir() and any(videos_dir.glob("*.mp4"))
 
     def get_records(self, data_dir: Path, split: str, lang: str) -> list[dict]:
@@ -52,7 +59,7 @@ class VideoChatGPTAdapter(DatasetAdapter):
         records = []
         for r in raw:
             video_name = r["video_name"]
-            video_path = str((data_dir / "videos" / video_name).resolve()) + ".mp4"
+            video_path = str((self._videos_dir(data_dir) / video_name).resolve()) + ".mp4"
             records.append({
                 "question_id": r["question_id"],
                 "video_path":  video_path,
